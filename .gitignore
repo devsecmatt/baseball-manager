@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Baseball Manager - secrets & tokens
+.env
+.yahoo_token.json
+*.db
+*.sqlite
+logs/
