@@ -132,11 +132,57 @@ You get picks **11 & 14** in rounds 1–2 — a strong back-to-back position.
 Show today's recommended lineup with players to start/bench based on
 game schedule, matchup, and projected output.
 
+```bash
+bbm lineup                    # Today's lineup
+bbm lineup --date 2026-04-15  # Lineup for a specific date
+```
+
 ### `bbm waivers`
 Show top waiver wire pickups and drop candidates for your current roster.
 
+```bash
+bbm waivers                   # Top 15 pickups + 5 drop candidates
+bbm waivers -p SP             # Pitchers only
+bbm waivers -n 25             # Show top 25 pickups
+```
+
 ### `bbm report`
-Full daily report: matchup status, lineup recommendation, and waiver targets.
+Full daily report combining matchup status, lineup recommendation, and top waiver targets.
+
+```bash
+bbm report
+```
+
+---
+
+### `bbm scheduler` — Automated Daily Reports
+
+Installs a macOS launchd agent that runs `bbm report` automatically each morning.
+
+```bash
+# Install — runs at 8:00 AM daily
+bbm scheduler install
+
+# Install at a custom time
+bbm scheduler install --time 07:30
+
+# Check status and view recent output
+bbm scheduler status
+
+# Run the report immediately (one-shot, no daemon)
+bbm scheduler now
+
+# Run daemon in foreground (for testing)
+bbm scheduler run
+
+# Remove the scheduler
+bbm scheduler uninstall
+```
+
+The scheduler writes logs to `logs/`:
+- `logs/scheduler.log` — daemon activity log
+- `logs/report_YYYY-MM-DD.log` — daily report output, one file per day
+- `logs/launchd_stdout.log` — raw launchd output
 
 ---
 
