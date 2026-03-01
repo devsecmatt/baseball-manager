@@ -209,6 +209,7 @@ __marimo__/
 # Baseball Manager - secrets & tokens
 .env
 .yahoo_token.json
+.playwright_cookies.json
 *.db
 *.sqlite
 logs/

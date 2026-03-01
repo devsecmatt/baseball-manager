@@ -397,5 +397,200 @@ def scheduler_now():
     run_daily_report()
 
 
+@main.group()
+def automate():
+    """Browser automation for Yahoo lineup and waiver moves."""
+    pass
+
+
+def _require_cookies():
+    """Exit with a helpful message if the cookie file is missing."""
+    from baseball_manager.browser.yahoo_browser import COOKIES_FILE
+    if not COOKIES_FILE.exists():
+        click.echo("No saved session found. Run `bbm automate login` first.")
+        raise SystemExit(1)
+
+
+@automate.command("login")
+def automate_login():
+    """Open a browser window for Yahoo login and save the session cookie."""
+    from baseball_manager.browser.yahoo_browser import YahooBrowser
+    YahooBrowser.login()
+
+
+@automate.command("lineup")
+@click.option("--date", "date_str", default=None, help="Date YYYY-MM-DD (default: today)")
+@click.option("--dry-run", is_flag=True, help="Print moves without executing them")
+@click.option("--headed", is_flag=True, help="Show browser window (for debugging)")
+def automate_lineup(date_str, dry_run, headed):
+    """Fetch optimal lineup and apply it on Yahoo."""
+    from datetime import date as dt
+    from baseball_manager.api.yahoo_client import YahooClient
+    from baseball_manager.data.mlb_schedule import get_playing_teams
+    from baseball_manager.lineup.optimizer import optimize_lineup, format_lineup, lineup_changes
+
+    target_date = dt.fromisoformat(date_str) if date_str else dt.today()
+    client = YahooClient()
+
+    click.echo(f"\nFetching roster and schedule for {target_date.isoformat()}...")
+    roster = _load_ranked_roster(client)
+    playing_teams = get_playing_teams(target_date)
+    click.echo(f"  {len(playing_teams)} MLB teams playing today\n")
+
+    optimal = optimize_lineup(roster, playing_teams, date_str=target_date.isoformat())
+    changes = lineup_changes(roster, optimal)
+
+    click.echo("=== RECOMMENDED LINEUP ===\n")
+    click.echo(format_lineup(optimal, playing_teams))
+
+    if not changes:
+        click.echo("\nNo lineup changes needed.")
+        return
+
+    click.echo("\n=== MOVES TO MAKE ===")
+    for c in changes:
+        click.echo(c)
+
+    if dry_run:
+        click.echo("\n[dry-run] No changes applied.")
+        return
+
+    _require_cookies()
+
+    from baseball_manager.browser.yahoo_browser import YahooBrowser
+    from baseball_manager.browser.lineup_setter import LineupSetter
+
+    click.echo("\nApplying lineup changes via browser...")
+    with YahooBrowser(headless=not headed) as browser:
+        setter = LineupSetter(browser)
+        moves = setter.set_lineup(target_date.isoformat(), optimal)
+
+    if moves:
+        click.echo("\n=== APPLIED MOVES ===")
+        for m in moves:
+            click.echo(m)
+    else:
+        click.echo("No moves were applied.")
+
+
+@automate.command("add")
+@click.argument("player_name")
+@click.option("--drop", "drop_name", default=None, help="Player to drop (if roster full)")
+@click.option("--headed", is_flag=True, help="Show browser window (for debugging)")
+def automate_add(player_name, drop_name, headed):
+    """Add a free agent to your roster, optionally dropping another player."""
+    _require_cookies()
+
+    from baseball_manager.browser.yahoo_browser import YahooBrowser
+    from baseball_manager.browser.transactions import TransactionManager
+
+    with YahooBrowser(headless=not headed) as browser:
+        tm = TransactionManager(browser)
+        success = tm.add_player(player_name, drop_name)
+
+    if success:
+        msg = f"Added {player_name}"
+        if drop_name:
+            msg += f", dropped {drop_name}"
+        click.echo(msg)
+    else:
+        click.echo(f"Failed to add {player_name}. Check logs/screenshots/ for details.")
+        raise SystemExit(1)
+
+
+@automate.command("drop")
+@click.argument("player_name")
+@click.option("--headed", is_flag=True, help="Show browser window (for debugging)")
+def automate_drop(player_name, headed):
+    """Drop a player from your roster."""
+    _require_cookies()
+
+    from baseball_manager.browser.yahoo_browser import YahooBrowser
+    from baseball_manager.browser.transactions import TransactionManager
+
+    with YahooBrowser(headless=not headed) as browser:
+        tm = TransactionManager(browser)
+        success = tm.drop_player(player_name)
+
+    if success:
+        click.echo(f"Dropped {player_name}")
+    else:
+        click.echo(f"Failed to drop {player_name}. Check logs/screenshots/ for details.")
+        raise SystemExit(1)
+
+
+@automate.command("waivers")
+@click.option("--dry-run", is_flag=True, help="Show what would happen without executing")
+@click.option("--headed", is_flag=True, help="Show browser window (for debugging)")
+def automate_waivers(dry_run, headed):
+    """Execute the top waiver pickup and drop the weakest roster player."""
+    from baseball_manager.api.yahoo_client import YahooClient
+    from baseball_manager.data.fangraphs import get_batting_projections, get_pitching_projections
+    from baseball_manager.draft.values import calculate_batter_values, calculate_pitcher_values, build_unified_rankings
+    from baseball_manager.roster.waivers import find_pickup_targets, find_drop_candidates
+
+    client = YahooClient()
+    click.echo("Fetching roster and free agents...")
+
+    my_roster = _load_ranked_roster(client)
+    raw_bat = get_batting_projections()
+    raw_pit = get_pitching_projections()
+    batters = calculate_batter_values(raw_bat)
+    pitchers = calculate_pitcher_values(raw_pit)
+    all_ranked = build_unified_rankings(batters, pitchers)
+
+    fa_names: set[str] = set()
+    free_agents_raw: list[str] = []
+    for start in range(0, 75, 25):
+        page = client.search_players(status="FA", start=start, count=25)
+        if not page:
+            break
+        for yp in page:
+            name = yp.get("name", {}).get("full", "")
+            if name and name not in fa_names:
+                fa_names.add(name)
+                free_agents_raw.append(name)
+
+    ranked_by_name = {p["name"].lower(): p for p in all_ranked}
+    free_agents = [ranked_by_name[n.lower()] for n in free_agents_raw if n.lower() in ranked_by_name]
+
+    targets = find_pickup_targets(my_roster, free_agents, top_n=1)
+    drops = find_drop_candidates(my_roster, top_n=1)
+
+    if not targets:
+        click.echo("No pickup targets found above current roster quality.")
+        return
+    if not drops:
+        click.echo("No drop candidates found.")
+        return
+
+    add_name = targets[0]["name"]
+    drop_name = drops[0]["name"]
+
+    click.echo(f"\nProposed transaction:")
+    click.echo(f"  ADD:  {add_name}")
+    click.echo(f"  DROP: {drop_name}")
+
+    if dry_run:
+        click.echo("\n[dry-run] No changes applied.")
+        return
+
+    _require_cookies()
+
+    from baseball_manager.browser.yahoo_browser import YahooBrowser
+    from baseball_manager.browser.transactions import TransactionManager
+
+    click.echo("\nExecuting transaction via browser...")
+    with YahooBrowser(headless=not headed) as browser:
+        tm = TransactionManager(browser)
+        success = tm.add_player(add_name, drop_name=drop_name)
+
+    if success:
+        click.echo(f"Done: added {add_name}, dropped {drop_name}")
+    else:
+        click.echo("Transaction failed. Check logs/screenshots/ for details.")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     main()

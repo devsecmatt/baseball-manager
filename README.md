@@ -186,6 +186,58 @@ The scheduler writes logs to `logs/`:
 
 ---
 
+### `bbm automate` — Browser Automation
+
+Executes lineup changes and waiver transactions directly on Yahoo using Playwright.
+The Yahoo Fantasy API is read-only, so write operations go through the browser.
+
+#### One-time setup
+
+```bash
+# Install Chromium browser (run once after pip install)
+playwright install chromium
+
+# Log in to Yahoo and save your session
+bbm automate login
+```
+
+`login` opens a headed browser window. Log in to Yahoo, navigate to your team,
+then press Enter in the terminal. Your session is saved to `.playwright_cookies.json`
+and reused by all subsequent `automate` commands (headless).
+
+#### Commands
+
+```bash
+# Set today's optimal lineup on Yahoo
+bbm automate lineup
+
+# Preview lineup moves without touching Yahoo
+bbm automate lineup --dry-run
+
+# Set lineup for a specific date
+bbm automate lineup --date 2026-04-15
+
+# Add a free agent (no drop needed)
+bbm automate add "Corbin Carroll"
+
+# Add a player and drop another in one transaction
+bbm automate add "Corbin Carroll" --drop "Tommy Edman"
+
+# Drop a player from your roster
+bbm automate drop "Tommy Edman"
+
+# Execute the top waiver pickup + weakest drop automatically
+bbm automate waivers
+
+# Preview waiver move without executing
+bbm automate waivers --dry-run
+```
+
+All commands accept `--headed` to show the browser window for debugging.
+On any page interaction failure, a screenshot is saved to `logs/screenshots/`.
+
+---
+
 ## Scoring Categories
 
 | Type | Categories |
